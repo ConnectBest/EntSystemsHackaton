@@ -8,6 +8,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4o-412991?logo=openai&logoColor=white)](https://openai.com/)
 [![Cohere](https://img.shields.io/badge/Cohere-AI-FF6B6B?logo=ai&logoColor=white)](https://cohere.com/)
 
 [📚 Documentation](docs/index.md) • [🏗️ Architecture](docs/architecture.md) • [🚀 Quick Start](#-quick-start) • [🎯 Features](#-key-features)
