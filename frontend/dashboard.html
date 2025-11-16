@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise SRE Platform - Tier 0 Operations</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="dashboard-page">
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-left">
+                <h1>Enterprise SRE Platform - Tier 0 Operations</h1>
+            </div>
+            <div class="header-right">
+                <span class="user-info">SRE User: <strong id="logged-in-user">ADMIN1</strong></span>
+                <button onclick="handleLogout()" class="btn-logout">Logout</button>
+            </div>
+        </header>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-item">
+                <span>Application status:</span>
+                <span id="app-status" class="status-live">Live</span>
+            </div>
+            <div class="status-item">
+                <span>SLA Target:</span>
+                <span class="sla-target">99.99999%</span>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+            <button class="action-btn" id="btn-version" onclick="showDeploymentVersion()">
+                Deployment Version
+            </button>
+            <button class="action-btn" id="btn-users" onclick="showActiveUsers()">
+                Site Active Users
+            </button>
+            <button class="action-btn" id="btn-devices" onclick="showActiveDevices()">
+                Active Connected Devices
+            </button>
+            <button class="action-btn" id="btn-intelligence" onclick="showImageIntelligence()">
+                SRE AI Agent
+            </button>
+            <button class="action-btn" id="btn-failover" onclick="showSimulateFailover()">
+                Simulate Failover
+            </button>
+        </div>
+
+        <!-- Content Area -->
+        <div class="content-area">
+            <div id="content-welcome" class="content-section active">
+                <h2>Welcome to the Tier-0 Test Driver</h2>
+                <p>Select an action above to begin monitoring your enterprise systems.</p>
+
+                <div class="quick-stats">
+                    <div class="stat-box">
+                        <div class="stat-icon">📡</div>
+                        <div class="stat-value" id="quick-devices">-</div>
+                        <div class="stat-label">Active Devices</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-value" id="quick-users">-</div>
+                        <div class="stat-label">Active Users</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-icon">🌍</div>
+                        <div class="stat-value" id="quick-sites">10</div>
+                        <div class="stat-label">Global Sites</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-value" id="quick-availability">99.99999%</div>
+                        <div class="stat-label">Availability</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="content-version" class="content-section">
+                <h2>Deployment Version</h2>
+                <div class="data-display">
+                    <p class="data-label">Site version:</p>
+                    <p class="data-value" id="version-info">Loading...</p>
+                </div>
+            </div>
+
+            <div id="content-users" class="content-section">
+                <h2>Site Active Users (Redis Cache)</h2>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <span class="metric-label">Concurrent Users:</span>
+                        <span class="metric-value" id="concurrent-users">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Active Sessions:</span>
+                        <span class="metric-value" id="active-sessions">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Backend Connections:</span>
+                        <span class="metric-value" id="backend-connections">-</span>
+                    </div>
+                </div>
+                <button class="btn-secondary" onclick="simulateHighTraffic()">Simulate High User Traffic</button>
+                <div id="user-list" class="data-list"></div>
+            </div>
+
+            <div id="content-devices" class="content-section">
+                <h2>Active Connected Devices (MQTT)</h2>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <span class="metric-label">Concurrent Devices:</span>
+                        <span class="metric-value" id="concurrent-devices">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">Active Sensors:</span>
+                        <span class="metric-value" id="active-sensors">-</span>
+                    </div>
+                    <div class="metric-item">
+                        <span class="metric-label">MQTT Messages/sec:</span>
+                        <span class="metric-value" id="mqtt-rate">-</span>
+                    </div>
+                </div>
+                <div id="device-list" class="data-list"></div>
+            </div>
+
+            <div id="content-intelligence" class="content-section">
+                <h2>SRE AI Agent</h2>
+                <p>AI-powered system analysis: natural language queries for device logs, telemetry patterns, and visual safety intelligence</p>
+
+                <div class="intelligence-controls">
+                    <h3>Visual Intelligence Analysis</h3>
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 20px;">
+                        <label>
+                            Device Type:
+                            <select id="wordcloud-device-filter">
+                                <option value="turbine">Turbines</option>
+                                <option value="thermal_engine">Thermal Engines</option>
+                                <option value="electrical_rotor">Electrical Rotors</option>
+                                <option value="connected_device">O&G Connected Devices</option>
+                            </select>
+                        </label>
+                        <button class="btn-secondary" onclick="generateWordCloud()">Describe Image Context</button>
+                    </div>
+                    <div id="wordcloud-container"></div>
+                </div>
+
+                <h3 style="margin-top: 40px;">Natural Language Queries</h3>
+
+                <div class="query-examples">
+                    <button class="example-query-btn" onclick="runQuery('Give me turbine sites that have workers without hats')">
+                        🔍 Give me turbine sites that have workers without hats
+                    </button>
+                    <button class="example-query-btn" onclick="runQuery('Give me turbine sites that have workers with high safety compliance')">
+                        🔍 Give me turbine sites that have workers with high safety compliance
+                    </button>
+                    <button class="example-query-btn" onclick="runQuery('Get sites where an engineer has a hard hat and tablet in hand')">
+                        🔍 Get sites where an engineer has a hard hat and tablet in hand
+                    </button>
+                </div>
+
+                <div class="custom-query">
+                    <h3>Custom Query</h3>
+                    <textarea id="custom-query-input" rows="3" placeholder="Enter your natural language query..."></textarea>
+                    <button class="btn-primary" onclick="runCustomQuery()">Submit Query</button>
+                </div>
+
+                <div id="query-results" class="query-results"></div>
+            </div>
+
+            <div id="content-failover" class="content-section">
+                <h2>Simulate Failover</h2>
+                <p>Test the high-availability and disaster recovery capabilities of the Tier-0 system.</p>
+
+                <div class="failover-status">
+                    <div class="failover-timeline">
+                        <div class="timeline-item">
+                            <span class="timeline-label">Current Status:</span>
+                            <span class="timeline-value" id="failover-current-status">Live</span>
+                        </div>
+                        <div class="timeline-item">
+                            <span class="timeline-label">Current Region:</span>
+                            <span class="timeline-value" id="failover-current-region">region1</span>
+                        </div>
+                        <div class="timeline-item">
+                            <span class="timeline-label">Version:</span>
+                            <span class="timeline-value" id="failover-version">v1.0.0057_region1</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="failover-actions">
+                    <h3>Multi-Region Failover</h3>
+                    <p>Execute true regional failover with database promotion and cache switchover</p>
+                    <button class="btn-failover" onclick="runFailoverTest('region2')">
+                        🌍 Failover to Region 2
+                    </button>
+                    <button class="btn-failover" onclick="runFailoverTest('region1')">
+                        🌍 Failover to Region 1
+                    </button>
+                </div>
+
+                <div id="failover-results" class="failover-results"></div>
+
+                <div class="failover-summary">
+                    <h3>Test Summary</h3>
+                    <div id="failover-summary-data"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="dashboard-footer">
+            <p>Enterprise Reliability Engineering Platform | Version 1.0.0 |
+                <a href="http://localhost:8000/health" target="_blank">System Health</a>
+            </p>
+        </footer>
+    </div>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

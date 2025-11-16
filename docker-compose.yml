@@ -1,0 +1,583 @@
+services:
+  # MQTT Broker for IoT Device Telemetry
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: tier0-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mqtt-data:/mosquitto/data
+      - mqtt-logs:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # RabbitMQ for User Activity Messages
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: tier0-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: tier0admin
+      RABBITMQ_DEFAULT_PASS: tier0secure
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis Cache - Master (Region 1)
+  redis:
+    image: redis:7-alpine
+    container_name: tier0-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache - Replica (Region 2)
+  redis-replica:
+    image: redis:7-alpine
+    container_name: tier0-redis-replica
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes --replicaof redis 6379
+    volumes:
+      - redis-replica-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Sentinel - Automatic Failover Management
+  redis-sentinel:
+    image: redis:7-alpine
+    container_name: tier0-redis-sentinel
+    ports:
+      - "26379:26379"
+    command: sh /etc/redis/start-sentinel.sh
+    volumes:
+      - ./config/redis-sentinel/start-sentinel.sh:/etc/redis/start-sentinel.sh
+      - redis-sentinel-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL - Primary Database (Region 1)
+  postgres:
+    image: postgres:16-alpine
+    container_name: tier0-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+      POSTGRES_HOST_AUTH_METHOD: md5
+    command: |
+      postgres
+      -c wal_level=replica
+      -c hot_standby=on
+      -c max_wal_senders=10
+      -c max_replication_slots=10
+      -c hot_standby_feedback=on
+      -c hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./config/postgres-primary/init-replication.sh:/docker-entrypoint-initdb.d/02-init-replication.sh
+      - ./config/postgres-primary/pg_hba.conf:/etc/postgresql/pg_hba.conf
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U tier0user -d tier0_db || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # PostgreSQL - Replica Database (Region 2)
+  postgres-replica:
+    image: postgres:16-alpine
+    container_name: tier0-postgres-replica
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      PGDATA: /var/lib/postgresql/data/pgdata
+      PGPASSWORD: tier0pass
+    command: |
+      bash -c "
+      # Ensure the data directory is owned by postgres user
+      mkdir -p /var/lib/postgresql/data/pgdata
+      chown -R postgres:postgres /var/lib/postgresql/data
+
+      # Switch to postgres user and run base backup
+      su postgres -c '
+        until PGPASSWORD=tier0pass pg_basebackup --pgdata=/var/lib/postgresql/data/pgdata -R --slot=replication_slot --host=postgres --port=5432 --username=tier0user -w; do
+          echo \"Waiting for primary to be available...\"
+          sleep 5
+        done
+        chmod 700 /var/lib/postgresql/data/pgdata
+      '
+
+      # Start postgres as postgres user
+      su postgres -c 'postgres -c hot_standby=on -D /var/lib/postgresql/data/pgdata'
+      "
+    volumes:
+      - postgres-replica-data:/var/lib/postgresql/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U tier0user -d tier0_db || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # MongoDB - NoSQL for Images & Embeddings
+  mongodb:
+    image: mongo:7
+    container_name: tier0-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: tier0admin
+      MONGO_INITDB_ROOT_PASSWORD: tier0mongo
+      MONGO_INITDB_DATABASE: tier0_images
+    volumes:
+      - mongodb-data:/data/db
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend - Middleware Orchestration Layer
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tier0-backend
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: tier0admin
+      MONGODB_PASSWORD: tier0mongo
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: tier0admin
+      RABBITMQ_PASS: tier0secure
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+      COHERE_API_KEY: ${COHERE_API_KEY}
+    volumes:
+      - ./backend:/app
+      - ./assignment-materials/CMPE273HackathonData:/app/data
+      - ./assignment-materials/BP_10K:/app/bp_docs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      mqtt-broker:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # IoT Device Simulator
+  device-simulator:
+    build:
+      context: ./simulators/device-simulator
+      dockerfile: Dockerfile
+    container_name: tier0-device-simulator
+    environment:
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+      NUM_DEVICES: 100000
+      NUM_SITES: 10
+      PUBLISH_INTERVAL: 5
+    depends_on:
+      mqtt-broker:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # User Activity Simulator
+  user-simulator:
+    build:
+      context: ./simulators/user-simulator
+      dockerfile: Dockerfile
+    container_name: tier0-user-simulator
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: tier0admin
+      RABBITMQ_PASS: tier0secure
+      NUM_USERS: 1000
+      PUBLISH_INTERVAL: 10
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # Image Processing Service (Cohere Embeddings)
+  image-processor:
+    build:
+      context: ./services/image-processor
+      dockerfile: Dockerfile
+    container_name: tier0-image-processor
+    environment:
+      COHERE_API_KEY: ${COHERE_API_KEY}
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: tier0admin
+      MONGODB_PASSWORD: tier0mongo
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes:
+      - ./assignment-materials/CMPE273HackathonData:/app/images
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # RAG Service for Log Analysis
+  rag-service:
+    build:
+      context: ./services/rag-service
+      dockerfile: Dockerfile
+    container_name: tier0-rag-service
+    environment:
+      COHERE_API_KEY: ${COHERE_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: tier0admin
+      MONGODB_PASSWORD: tier0mongo
+    volumes:
+      - ./assignment-materials/CMPE273HackathonData/LogData:/app/logs
+      - ./assignment-materials/BP_10K:/app/bp_docs
+      - rag-cache:/app/cache  # Persist embeddings across restarts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # MQTT Consumer - Ingests Device Telemetry into PostgreSQL
+  mqtt-consumer:
+    build:
+      context: ./services/mqtt-consumer
+      dockerfile: Dockerfile
+    container_name: tier0-mqtt-consumer
+    environment:
+      MQTT_HOST: mqtt-broker
+      MQTT_PORT: 1883
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+    depends_on:
+      mqtt-broker:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # RabbitMQ Consumer - Ingests User Sessions into PostgreSQL
+  rabbitmq-consumer:
+    build:
+      context: ./services/rabbitmq-consumer
+      dockerfile: Dockerfile
+    container_name: tier0-rabbitmq-consumer
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: tier0admin
+      RABBITMQ_PASS: tier0secure
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # Frontend Web Dashboard
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tier0-frontend
+    ports:
+      - "3000:80"
+    environment:
+      BACKEND_API_URL: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # Prometheus - Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: tier0-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: tier0-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: tier0admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # Data Cleanup Service - Periodic cleanup to prevent unbounded growth
+  data-cleanup:
+    build:
+      context: ./services/data-cleanup
+      dockerfile: Dockerfile
+    container_name: tier0-data-cleanup
+    environment:
+      CLEANUP_INTERVAL_SECONDS: 300  # Run cleanup every 5 minutes
+      RETENTION_HOURS: 24  # Keep last 24 hours of data
+      MAX_RECORDS_PER_TABLE: 100000  # Max 100K records per table
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: tier0admin
+      MONGODB_PASSWORD: tier0mongo
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+  # Failover Orchestrator - Multi-Region HA/DR Coordination
+  failover-orchestrator:
+    build:
+      context: ./services/failover-orchestrator
+      dockerfile: Dockerfile
+    container_name: tier0-failover-orchestrator
+    ports:
+      - "8003:8003"
+    environment:
+      # Region 1 (Primary)
+      POSTGRES_PRIMARY_HOST: postgres
+      POSTGRES_PRIMARY_PORT: 5432
+      # Region 2 (Replica)
+      POSTGRES_REPLICA_HOST: postgres-replica
+      POSTGRES_REPLICA_PORT: 5432
+      # Shared credentials
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      POSTGRES_DB: tier0_db
+      # Redis Sentinel
+      REDIS_SENTINEL_HOST: redis-sentinel
+      REDIS_SENTINEL_PORT: 26379
+      # Backend
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      postgres-replica:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-replica:
+        condition: service_healthy
+      redis-sentinel:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Failover Test Service - HA/DR Simulation
+  failover-test:
+    build:
+      context: ./services/failover-test
+      dockerfile: Dockerfile
+    container_name: tier0-failover-test
+    ports:
+      - "8002:8002"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tier0_db
+      POSTGRES_USER: tier0user
+      POSTGRES_PASSWORD: tier0pass
+      MONGODB_HOST: mongodb
+      MONGODB_PORT: 27017
+      MONGODB_USER: tier0admin
+      MONGODB_PASSWORD: tier0mongo
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - tier0-network
+
+networks:
+  tier0-network:
+    driver: bridge
+
+volumes:
+  mqtt-data:
+  mqtt-logs:
+  rabbitmq-data:
+  redis-data:
+  redis-replica-data:
+  redis-sentinel-data:
+  postgres-data:
+  postgres-replica-data:
+  mongodb-data:
+  rag-cache:  # Persist RAG embeddings across container rebuilds
+  prometheus-data:
+  grafana-data:

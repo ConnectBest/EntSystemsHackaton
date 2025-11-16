@@ -1,0 +1,46 @@
+{
+  "message_id": "MSG-20251115-00123",
+  "timestamp_utc": "2025-11-15T23:25:10Z",
+  "site_id": "SFO-WEB-01",
+  "metrics": {
+    "active_users": 324,
+    "active_connections": 289,
+    "server_cpu_pct": 64.3,
+    "server_memory_gb": 18.7,
+    "average_latency_ms": 72.4
+  },
+  "active_users_list": [
+    {
+      "user_id": "USR-09421",
+      "username": "alex_j",
+      "session_id": "SESS-342AF1",
+      "login_time": "2025-11-15T22:57:44Z",
+      "ip_address": "192.168.1.104",
+      "region": "US-WEST",
+      "connection_status": "active"
+    },
+    {
+      "user_id": "USR-11290",
+      "username": "maria_k",
+      "session_id": "SESS-772B8C",
+      "login_time": "2025-11-15T22:59:02Z",
+      "ip_address": "10.10.2.56",
+      "region": "US-EAST",
+      "connection_status": "active"
+    },
+    {
+      "user_id": "USR-00874",
+      "username": "chen_li",
+      "session_id": "SESS-58E2DA",
+      "login_time": "2025-11-15T23:00:18Z",
+      "ip_address": "172.16.3.220",
+      "region": "APAC",
+      "connection_status": "idle"
+    }
+  ],
+  "queue_metadata": {
+    "topic": "webapp/active_users",
+    "producer": "SiteSimEngine",
+    "priority": "normal",
+    "retries": 0
+  }

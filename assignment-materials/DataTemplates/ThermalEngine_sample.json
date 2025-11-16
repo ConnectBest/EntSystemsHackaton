@@ -1,0 +1,19 @@
+{
+  "device_id": "THRM-22177",
+  "device_type": "thermal_engine",
+  "site_id": "TX-EAGLE",
+  "timestamp_utc": "2025-11-15T23:10:05Z",
+  "firmware": "1.9.0",
+  "metrics": {
+    "rpm": 1850,
+    "coolant_temp_c": 91.3,
+    "oil_temp_c": 98.6,
+    "oil_pressure_bar": 4.6,
+    "load_pct": 72.4,
+    "fuel_rate_l_h": 158.2,
+    "soot_pct": 0.6
+  },
+  "status": { "state": "WARN", "code": "OIL-LOW", "message": "Oil pressure trending low" },
+  "location": { "lat": 31.2319, "lon": -101.8752 },
+  "tags": { "skid": "TE-07", "phase": "commissioned" }
+}

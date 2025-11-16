@@ -1,0 +1,11 @@
+{
+  "device_id": "string",
+  "device_type": "string",
+  "site_id": "string",
+  "timestamp_utc": "ISO-8601",
+  "firmware": "string",
+  "metrics": { "key": "number ..." },
+  "status": { "state": "OK|WARN|ALERT", "code": "string", "message": "string" },
+  "location": { "lat": 0.0, "lon": 0.0 },
+  "tags": { "key": "value" }
+}

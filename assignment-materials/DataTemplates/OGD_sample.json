@@ -1,0 +1,21 @@
+{
+  "device_id": "OGC-78402",
+  "device_type": "connected_device",
+  "site_id": "ND-RAVEN",
+  "timestamp_utc": "2025-11-15T23:10:05Z",
+  "firmware": "5.0.3",
+  "metrics": {
+    "wellhead_pressure_bar": 132.7,
+    "wellhead_temp_c": 67.4,
+    "flow_rate_m3_h": 84.9,
+    "methane_leak_ppm": 2.0,
+    "battery_soc_pct": 88.0,
+    "rssi_dbm": -72
+  },
+  "status": { "state": "OK", "code": "GW-OK", "message": "All sensors online" },
+  "location": { "lat": 48.3992, "lon": -102.7810 },
+  "tags": { "network": "LTE", "ingress": "MQTT-1" }
+}
+
+
+

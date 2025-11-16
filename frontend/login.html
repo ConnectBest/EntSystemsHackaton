@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise SRE Platform - Tier 0 Operations</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <div class="login-header">
+            <h1>Enterprise SRE Platform</h1>
+            <h2>Tier 0 Operations Dashboard</h2>
+            <p class="sla-badge">SLA Target: 99.99999%</p>
+        </div>
+
+        <div class="login-card">
+            <h3>Authentication Required</h3>
+            <p>Please login to access the Tier-0 operations dashboard</p>
+
+            <form id="login-form" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="username">SRE User</label>
+                    <input
+                        type="text"
+                        id="username"
+                        name="username"
+                        value="ADMIN1"
+                        required
+                        autocomplete="username"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        value="Welcome"
+                        required
+                        autocomplete="current-password"
+                    >
+                </div>
+
+                <div class="login-buttons">
+                    <button type="submit" class="btn-login">Login</button>
+                    <button type="button" class="btn-cancel" onclick="clearForm()">Cancel</button>
+                </div>
+
+                <div id="login-error" class="error-message" style="display: none;"></div>
+            </form>
+
+            <div class="login-info">
+                <p><strong>Default Credentials:</strong></p>
+                <p>Username: <code>ADMIN1</code></p>
+                <p>Password: <code>Welcome</code></p>
+            </div>
+        </div>
+
+        <footer class="login-footer">
+            <p>Enterprise Reliability Engineering Platform</p>
+        </footer>
+    </div>
+
+    <script>
+        function handleLogin(event) {
+            event.preventDefault();
+
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorDiv = document.getElementById('login-error');
+
+            // Simple authentication (for demo purposes)
+            if (username === 'ADMIN1' && password === 'Welcome') {
+                // Store session
+                localStorage.setItem('sreUser', username);
+                localStorage.setItem('loginTime', new Date().toISOString());
+
+                // Redirect to dashboard
+                window.location.href = 'dashboard.html';
+            } else {
+                errorDiv.textContent = 'Invalid credentials. Please use ADMIN1/Welcome';
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        function clearForm() {
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('login-error').style.display = 'none';
+        }
+
+        // Check if already logged in
+        if (localStorage.getItem('sreUser')) {
+            window.location.href = 'dashboard.html';
+        }
+    </script>
+</body>
+</html>
