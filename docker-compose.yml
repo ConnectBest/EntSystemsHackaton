@@ -145,24 +145,23 @@ services:
       POSTGRES_USER: tier0user
       POSTGRES_PASSWORD: tier0pass
       PGDATA: /var/lib/postgresql/data/pgdata
-      PGPASSWORD: tier0pass
+    entrypoint: /bin/sh
     command: |
-      bash -c "
-      # Ensure the data directory is owned by postgres user
-      mkdir -p /var/lib/postgresql/data/pgdata
-      chown -R postgres:postgres /var/lib/postgresql/data
+      -c "
+      set -e
 
-      # Switch to postgres user and run base backup
-      su postgres -c '
-        until PGPASSWORD=tier0pass pg_basebackup --pgdata=/var/lib/postgresql/data/pgdata -R --slot=replication_slot --host=postgres --port=5432 --username=tier0user -w; do
-          echo \"Waiting for primary to be available...\"
+      # If pgdata doesn't exist or is empty, initialize replica
+      if [ ! -f /var/lib/postgresql/data/pgdata/PG_VERSION ]; then
+        echo 'Initializing replica from primary...'
+        until PGPASSWORD=tier0pass pg_basebackup -h postgres -p 5432 -U tier0user -D /var/lib/postgresql/data/pgdata -Fp -Xs -P -R --slot=replication_slot; do
+          echo 'Waiting for primary...'
           sleep 5
         done
-        chmod 700 /var/lib/postgresql/data/pgdata
-      '
+        echo 'Replica initialized successfully'
+      fi
 
-      # Start postgres as postgres user
-      su postgres -c 'postgres -c hot_standby=on -D /var/lib/postgresql/data/pgdata'
+      # Start PostgreSQL
+      exec docker-entrypoint.sh postgres -c hot_standby=on
       "
     volumes:
       - postgres-replica-data:/var/lib/postgresql/data

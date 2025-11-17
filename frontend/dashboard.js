@@ -60,8 +60,11 @@ async function showDeploymentVersion() {
     document.getElementById('btn-version').classList.add('active');
 
     try {
-        // Simulate API call for version
-        const version = 'v1.0.0057_region1';
+        // Fetch real version from failover orchestrator
+        const response = await fetch(`${FAILOVER_ORCHESTRATOR}/status`);
+        const data = await response.json();
+
+        const version = data.version || 'v1.0.0057_region1';
         document.getElementById('version-info').textContent = version;
     } catch (error) {
         console.error('Error loading version:', error);
