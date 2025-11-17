@@ -321,6 +321,8 @@ services:
       context: ./services/rag-service
       dockerfile: Dockerfile
     container_name: tier0-rag-service
+    ports:
+      - "8001:8001"
     environment:
       COHERE_API_KEY: ${COHERE_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}

@@ -177,7 +177,12 @@ async def root():
             "sites": "/api/sites",
             "images": "/api/images",
             "logs": "/api/logs",
-            "query": "/api/query",
+            "query": {
+                "unified": "/api/query (auto-routes based on keywords)",
+                "images": "/api/query/images (MongoDB image embeddings)",
+                "documents": "/api/query/documents (FAISS vector search on PDFs)",
+                "logs": "/api/query/logs (PostgreSQL operational logs)"
+            },
             "failover": "/api/failover/summary"
         }
     }
@@ -492,17 +497,17 @@ async def get_top_ips(limit: int = 20):
         logger.error(f"Error fetching top IPs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ============= RAG QUERY ENDPOINT =============
+# ============= RAG QUERY ENDPOINTS =============
 
 @app.post("/api/query")
 async def natural_language_query(request: QueryRequest):
-    """Process natural language queries using RAG"""
+    """Process natural language queries using RAG (auto-routes to best source)"""
     try:
         import httpx
 
         question = request.question
 
-        # Call the RAG service
+        # Call the RAG service unified endpoint
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
@@ -547,6 +552,102 @@ async def natural_language_query(request: QueryRequest):
 
     except Exception as e:
         logger.error(f"Error processing query: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/query/images")
+async def query_images(request: QueryRequest):
+    """Search MongoDB image embeddings for safety compliance analysis"""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "http://rag-service:8001/query/images",
+                json={"question": request.question}
+            )
+
+            if response.status_code == 200:
+                rag_response = response.json()
+                result = rag_response.get("result", {})
+
+                return {
+                    "question": request.question,
+                    "answer": result.get("answer", "No answer available"),
+                    "data": result.get("data", []),
+                    "sites": result.get("sites", []),
+                    "count": result.get("count"),
+                    "avg_compliance": result.get("avg_compliance"),
+                    "type": result.get("type", "image_analysis"),
+                    "source": "mongodb_images",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Image query failed")
+
+    except Exception as e:
+        logger.error(f"Error querying images: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/query/documents")
+async def query_documents(request: QueryRequest):
+    """Search BP Annual Reports using vector semantic search (FAISS)"""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "http://rag-service:8001/query/documents",
+                json={"question": request.question}
+            )
+
+            if response.status_code == 200:
+                rag_response = response.json()
+                result = rag_response.get("result", {})
+
+                return {
+                    "question": request.question,
+                    "answer": result.get("answer", "No answer available"),
+                    "sources": result.get("sources", []),
+                    "type": result.get("type", "bp_documents"),
+                    "source": "bp_documents_vector_search",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Document query failed")
+
+    except Exception as e:
+        logger.error(f"Error querying documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/query/logs")
+async def query_logs(request: QueryRequest):
+    """Search PostgreSQL operational logs for system analytics"""
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                "http://rag-service:8001/query/logs",
+                json={"question": request.question}
+            )
+
+            if response.status_code == 200:
+                rag_response = response.json()
+                result = rag_response.get("result", {})
+
+                return {
+                    "question": request.question,
+                    "answer": result.get("answer", "No answer available"),
+                    "data": result.get("data"),
+                    "type": result.get("type", "log_analysis"),
+                    "source": "postgresql_logs",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Log query failed")
+
+    except Exception as e:
+        logger.error(f"Error querying logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ============= FAILOVER TEST ENDPOINTS =============

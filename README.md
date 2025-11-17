@@ -37,10 +37,11 @@ A production-grade demonstration of **Tier-0 Enterprise Site Reliability Enginee
 <td width="50%">
 
 **🤖 AI Intelligence**
-- Cohere-enhanced RAG for natural language queries
+- **AI-Driven Query Routing** with OpenAI/Cohere function calling
+- Multi-source queries (combines images, documents, logs)
 - Safety compliance detection from site cameras
-- BP document analysis with semantic search
-- Intelligent answer synthesis
+- BP document analysis with FAISS vector search
+- Automatic keyword fallback for Tier-0 reliability
 
 </td>
 </tr>
@@ -81,9 +82,10 @@ A production-grade demonstration of **Tier-0 Enterprise Site Reliability Enginee
 git clone <repository-url>
 cd EntSystemsHackaton
 
-# 2. Configure environment (optional - add Cohere API key)
+# 2. Configure environment (add AI API keys for intelligent routing)
 cp .env.example .env
-echo "COHERE_API_KEY=your_key_here" >> .env
+echo "OPENAI_API_KEY=sk-..." >> .env      # Preferred for gpt-4o function calling
+echo "COHERE_API_KEY=your_key_here" >> .env  # Fallback option
 
 # 3. Start all services (18+ containers)
 docker-compose up --build

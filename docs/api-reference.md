@@ -279,11 +279,17 @@ curl "http://localhost:8000/api/images?has_hard_hat=false&limit=10"
 
 ---
 
-### Natural Language Query
+### Natural Language Query (AI-Driven Routing)
 
 #### POST `/api/query`
 
-Execute natural language queries using RAG service.
+Execute natural language queries with **AI-driven intelligent routing** using OpenAI function calling or Cohere tool use.
+
+**How It Works**:
+1. AI analyzes your question semantically
+2. AI selects appropriate data source(s): images, documents, or logs
+3. Can query multiple sources for comprehensive answers
+4. Falls back to keyword routing if AI unavailable (Tier-0 reliability)
 
 **Request Body**:
 ```json
@@ -292,36 +298,140 @@ Execute natural language queries using RAG service.
 }
 ```
 
-**Example Request**:
+**Example Requests**:
 ```bash
+# AI routes to images (MongoDB)
 curl -X POST http://localhost:8000/api/query \
   -H "Content-Type: application/json" \
   -d '{"question": "Show me sites where workers do not have hard hats"}'
+
+# AI routes to documents (FAISS vector search)
+curl -X POST http://localhost:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "BP Tier 1 and Tier 2 safety events in 2024"}'
+
+# AI routes to BOTH documents AND images (multi-source)
+curl -X POST http://localhost:8000/api/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Compare BP safety reports to camera footage"}'
 ```
 
 **Response**:
 ```json
 {
+  "question": "Show me sites where workers do not have hard hats",
   "result": {
-    "answer": "Analysis reveals 12 images from 4 sites showing workers without proper hard hat PPE...",
-    "sources": ["BP Annual Report 2024", "Site Images"],
-    "type": "combined",
-    "synthesized": true,
-    "query_time_ms": 1234
-  }
+    "answer": "Found 12 images showing workers WITHOUT proper safety equipment...",
+    "routing_method": "ai_function_calling",
+    "tools_called": ["search_images"],
+    "data": [...],
+    "sites": ["turbine", "thermal_engine"],
+    "count": 12,
+    "avg_compliance": 45.2,
+    "type": "image_analysis"
+  },
+  "timestamp": "2025-11-16T12:30:45Z"
 }
 ```
 
-**Query Types** (automatically detected):
-- **BP Documents**: Queries about incidents, operations, drilling
-- **Images**: Queries about sites, workers, safety equipment
-- **Logs**: Queries about IPs, errors, requests
-- **Combined**: Safety compliance queries (BP docs + images)
+**Routing Methods** (in `routing_method` field):
+- `ai_function_calling` - OpenAI gpt-4o function calling (preferred)
+- `ai_tool_use` - Cohere command-a-vision tool use (fallback)
+- `keyword_fallback` - Keyword-based routing (Tier-0 reliability)
 
 **Status Codes**:
 - `200 OK`: Success
 - `400 Bad Request`: Missing or invalid question
 - `500 Internal Server Error`: RAG service error
+
+---
+
+### Specialized Query Endpoints (Explicit Routing)
+
+Use these endpoints to bypass AI routing and directly query specific data sources.
+
+#### POST `/api/query/images`
+
+Search MongoDB image embeddings for safety compliance analysis.
+
+**Request**:
+```bash
+curl -X POST http://localhost:8000/api/query/images \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Workers with tablets and hard hats"}'
+```
+
+**Response**:
+```json
+{
+  "question": "Workers with tablets and hard hats",
+  "answer": "Found 8 images showing workers with proper safety equipment...",
+  "data": [...],
+  "sites": ["turbine", "electrical_rotor"],
+  "count": 8,
+  "avg_compliance": 92.5,
+  "source": "mongodb_images"
+}
+```
+
+---
+
+#### POST `/api/query/documents`
+
+Search BP Annual Reports using FAISS vector semantic search.
+
+**Request**:
+```bash
+curl -X POST http://localhost:8000/api/query/documents \
+  -H "Content-Type: application/json" \
+  -d '{"question": "BP Tier 1 and Tier 2 process safety events"}'
+```
+
+**Response**:
+```json
+{
+  "question": "BP Tier 1 and Tier 2 process safety events",
+  "answer": "According to BP's 2024 Annual Report, there were 38 Tier 1 and Tier 2...",
+  "sources": [
+    {
+      "text": "In 2024, BP reported 38 Tier 1 and Tier 2 process safety events...",
+      "source": "BP_Annual_Report_2024.pdf",
+      "year": 2024,
+      "similarity_score": 0.89
+    }
+  ],
+  "source": "bp_documents_vector_search"
+}
+```
+
+---
+
+#### POST `/api/query/logs`
+
+Search PostgreSQL operational logs for system analytics.
+
+**Request**:
+```bash
+curl -X POST http://localhost:8000/api/query/logs \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Top IP addresses by traffic"}'
+```
+
+**Response**:
+```json
+{
+  "question": "Top IP addresses by traffic",
+  "answer": "The IP address generating the most requests is 192.168.1.100 with 1,234 requests...",
+  "data": [
+    {
+      "ip_address": "192.168.1.100",
+      "request_count": 1234,
+      "error_count": 45
+    }
+  ],
+  "source": "postgresql_logs"
+}
+```
 
 ---
 
@@ -355,8 +465,17 @@ Get RAG service statistics.
 ```json
 {
   "bp_documents_loaded": 2,
-  "log_entries_cached": 1000,
-  "cohere_enabled": true
+  "log_entries_cached": 10000,
+  "cohere_enabled": false,
+  "openai_enabled": true,
+  "ai_provider": "OpenAI",
+  "vector_index_size": 1247,
+  "endpoints": {
+    "unified": "/query (auto-routes based on keywords)",
+    "images": "/query/images (MongoDB image embeddings)",
+    "documents": "/query/documents (FAISS vector search on PDFs)",
+    "logs": "/query/logs (PostgreSQL operational logs)"
+  }
 }
 ```
 

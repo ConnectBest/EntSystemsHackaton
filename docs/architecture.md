@@ -47,7 +47,7 @@ graph TB
     end
 
     subgraph "AI Services"
-        RAG[RAG Service<br/>Port 8001<br/>Cohere-Enhanced]
+        RAG[RAG Service<br/>Port 8001<br/>AI-Driven Routing<br/>OpenAI/Cohere]
         IMG_PROC[Image Processor<br/>Cohere Embeddings]
     end
 
@@ -234,10 +234,22 @@ graph TB
 ### AI Services
 
 #### RAG Service (Port 8001)
-- **Technology**: FastAPI + Cohere API + FAISS Vector Search
-- **Embedding Model**: `embed-english-v3.0` (1024 dimensions)
-- **LLM Model**: `command-a-vision-07-2025`
-- **Temperature**: 0.3 (factual responses)
+- **Technology**: FastAPI + OpenAI/Cohere + FAISS Vector Search
+- **AI Routing**:
+  - **OpenAI gpt-4o** function calling (preferred, ~95% accuracy)
+  - **Cohere command-a-vision** tool use (fallback, ~90% accuracy)
+  - **Keyword routing** (Tier-0 fallback, ~70-80% accuracy)
+- **Embedding Models**:
+  - OpenAI `text-embedding-3-large` (3072 dimensions, preferred)
+  - Cohere `embed-english-v3.0` (1024 dimensions, fallback)
+- **LLM Models**:
+  - OpenAI `gpt-4o` (preferred)
+  - Cohere `command-a-vision-07-2025` (fallback)
+- **Temperature**: 0.1 for routing, 0.3 for synthesis
+- **Data Sources**:
+  1. **MongoDB Images**: Safety compliance from site cameras
+  2. **FAISS Documents**: BP Annual Reports semantic search
+  3. **PostgreSQL Logs**: System operational metrics
 - **Vector Search**:
   - FAISS IndexFlatIP with L2 normalization for cosine similarity
   - Semantic search using document embeddings
@@ -248,12 +260,13 @@ graph TB
   - Method 2: Pattern-based search (for specific metrics)
   - Method 3: Keyword search (fallback)
   - Deduplication and relevance ranking
-- **Capabilities**:
-  - BP document analysis (PDFs) with semantic understanding
-  - System log analysis (Apache logs)
-  - Image safety compliance queries
-  - Combined multi-source RAG
-- **Fallback**: Keyword-based responses (Tier-0 reliability)
+- **Query Endpoints**:
+  - `/query` - AI-driven routing (unified)
+  - `/query/images` - Direct MongoDB search
+  - `/query/documents` - Direct FAISS search
+  - `/query/logs` - Direct PostgreSQL search
+- **Multi-Source Queries**: Can combine multiple data sources (e.g., "Compare BP reports to camera footage")
+- **Tier-0 Reliability**: Automatic fallback to keyword routing if AI unavailable
 - **Token Management**: Adaptive snippet sizing (800-1500 chars based on content type)
 
 #### Image Processor

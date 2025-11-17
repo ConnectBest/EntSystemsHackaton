@@ -1,5 +1,6 @@
 import os
 import re
+import json
 import logging
 import time
 import pickle
@@ -529,6 +530,274 @@ class RAGService:
                 return None
         else:
             return None
+
+    def intelligent_route_query(self, question: str) -> Dict:
+        """Use AI function calling to intelligently route queries to appropriate data sources"""
+
+        # Define available tools/functions
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_images",
+                    "description": "Search site camera images for safety compliance analysis. Use this for queries about workers, safety equipment (hard hats, vests, tablets), PPE compliance, or visual site inspections. Returns image analysis with compliance scores.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question to search image data for"
+                            }
+                        },
+                        "required": ["question"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_documents",
+                    "description": "Search BP Annual Reports using semantic vector search. Use this for queries about BP operations, safety incidents, Tier 1/Tier 2 events, oil spills, annual statistics, drilling procedures, or company policies. Returns document excerpts with citations.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question to search BP documents for"
+                            }
+                        },
+                        "required": ["question"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_logs",
+                    "description": "Search system operational logs in PostgreSQL. Use this for queries about IP addresses, HTTP errors, request statistics, response times, or system performance metrics. Returns log analysis and statistics.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question to search system logs for"
+                            }
+                        },
+                        "required": ["question"]
+                    }
+                }
+            }
+        ]
+
+        # Use OpenAI function calling
+        if self.use_openai and self.openai_client:
+            try:
+                logger.info(f"Using OpenAI function calling to route query: {question}")
+
+                response = self.openai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an intelligent query router for a Tier-0 enterprise system. Analyze the user's question and determine which data source(s) to search. You can call multiple functions if the question requires data from multiple sources."
+                        },
+                        {
+                            "role": "user",
+                            "content": question
+                        }
+                    ],
+                    tools=tools,
+                    tool_choice="auto",
+                    temperature=0.1
+                )
+
+                message = response.choices[0].message
+
+                # Check if AI wants to call functions
+                if message.tool_calls:
+                    logger.info(f"AI selected {len(message.tool_calls)} tool(s): {[tc.function.name for tc in message.tool_calls]}")
+
+                    results = []
+
+                    # Execute each tool call
+                    for tool_call in message.tool_calls:
+                        function_name = tool_call.function.name
+                        function_args = json.loads(tool_call.function.arguments)
+
+                        logger.info(f"Executing {function_name} with args: {function_args}")
+
+                        # Route to appropriate function
+                        if function_name == "search_images":
+                            result = self.query_images(function_args["question"])
+                            result["tool_used"] = "search_images"
+                            results.append(result)
+                        elif function_name == "search_documents":
+                            result = self.query_bp_documents(function_args["question"])
+                            result["tool_used"] = "search_documents"
+                            results.append(result)
+                        elif function_name == "search_logs":
+                            result = self.query_logs(function_args["question"])
+                            result["tool_used"] = "search_logs"
+                            results.append(result)
+
+                    # Combine results if multiple tools were called
+                    if len(results) == 1:
+                        return {
+                            **results[0],
+                            "routing_method": "ai_function_calling",
+                            "tools_called": [results[0]["tool_used"]]
+                        }
+                    else:
+                        # Multiple tools - synthesize combined answer
+                        combined_context = []
+                        tools_called = []
+
+                        for result in results:
+                            tools_called.append(result["tool_used"])
+                            combined_context.append(f"From {result['tool_used']}: {result.get('answer', 'No data')}")
+
+                        synthesis_prompt = f"""The user asked: "{question}"
+
+Data from multiple sources:
+{chr(10).join(combined_context)}
+
+Synthesize a comprehensive answer that combines insights from all sources. Be concise but complete."""
+
+                        synthesized_answer = self._synthesize_answer(synthesis_prompt, max_tokens=600)
+
+                        return {
+                            "answer": synthesized_answer or "\n\n".join(combined_context),
+                            "sources": results,
+                            "type": "multi_source_ai_routing",
+                            "routing_method": "ai_function_calling",
+                            "tools_called": tools_called,
+                            "synthesized": True
+                        }
+
+                # No function calls - AI responded directly (shouldn't happen with tool_choice="auto")
+                logger.warning("AI did not call any functions, falling back to keyword routing")
+                return None
+
+            except Exception as e:
+                logger.error(f"Error with OpenAI function calling: {e}", exc_info=True)
+                return None
+
+        # Cohere tool use (similar approach)
+        elif self.cohere_client:
+            try:
+                logger.info(f"Using Cohere tool use to route query: {question}")
+
+                # Cohere tools format
+                cohere_tools = [
+                    {
+                        "name": "search_images",
+                        "description": "Search site camera images for safety compliance analysis. Use this for queries about workers, safety equipment (hard hats, vests, tablets), PPE compliance, or visual site inspections.",
+                        "parameter_definitions": {
+                            "question": {
+                                "description": "The question to search image data for",
+                                "type": "str",
+                                "required": True
+                            }
+                        }
+                    },
+                    {
+                        "name": "search_documents",
+                        "description": "Search BP Annual Reports using semantic vector search. Use this for queries about BP operations, safety incidents, Tier 1/Tier 2 events, oil spills, annual statistics, or drilling procedures.",
+                        "parameter_definitions": {
+                            "question": {
+                                "description": "The question to search BP documents for",
+                                "type": "str",
+                                "required": True
+                            }
+                        }
+                    },
+                    {
+                        "name": "search_logs",
+                        "description": "Search system operational logs. Use this for queries about IP addresses, HTTP errors, request statistics, or system performance metrics.",
+                        "parameter_definitions": {
+                            "question": {
+                                "description": "The question to search system logs for",
+                                "type": "str",
+                                "required": True
+                            }
+                        }
+                    }
+                ]
+
+                response = self.cohere_client.chat(
+                    message=question,
+                    model="command-a-vision-07-2025",
+                    tools=cohere_tools,
+                    temperature=0.1
+                )
+
+                # Check if Cohere wants to call tools
+                if response.tool_calls:
+                    logger.info(f"Cohere selected {len(response.tool_calls)} tool(s): {[tc.name for tc in response.tool_calls]}")
+
+                    results = []
+
+                    for tool_call in response.tool_calls:
+                        function_name = tool_call.name
+                        function_args = tool_call.parameters
+
+                        logger.info(f"Executing {function_name} with args: {function_args}")
+
+                        if function_name == "search_images":
+                            result = self.query_images(function_args["question"])
+                            result["tool_used"] = "search_images"
+                            results.append(result)
+                        elif function_name == "search_documents":
+                            result = self.query_bp_documents(function_args["question"])
+                            result["tool_used"] = "search_documents"
+                            results.append(result)
+                        elif function_name == "search_logs":
+                            result = self.query_logs(function_args["question"])
+                            result["tool_used"] = "search_logs"
+                            results.append(result)
+
+                    # Combine results
+                    if len(results) == 1:
+                        return {
+                            **results[0],
+                            "routing_method": "ai_tool_use",
+                            "tools_called": [results[0]["tool_used"]]
+                        }
+                    else:
+                        combined_context = []
+                        tools_called = []
+
+                        for result in results:
+                            tools_called.append(result["tool_used"])
+                            combined_context.append(f"From {result['tool_used']}: {result.get('answer', 'No data')}")
+
+                        synthesis_prompt = f"""The user asked: "{question}"
+
+Data from multiple sources:
+{chr(10).join(combined_context)}
+
+Synthesize a comprehensive answer."""
+
+                        synthesized_answer = self._synthesize_answer(synthesis_prompt, max_tokens=600)
+
+                        return {
+                            "answer": synthesized_answer or "\n\n".join(combined_context),
+                            "sources": results,
+                            "type": "multi_source_ai_routing",
+                            "routing_method": "ai_tool_use",
+                            "tools_called": tools_called,
+                            "synthesized": True
+                        }
+
+                logger.warning("Cohere did not call any tools, falling back to keyword routing")
+                return None
+
+            except Exception as e:
+                logger.error(f"Error with Cohere tool use: {e}", exc_info=True)
+                return None
+
+        # No AI available
+        return None
 
     def query_logs(self, question: str) -> Dict:
         """Answer questions about system logs using Cohere-enhanced analysis"""
@@ -1153,63 +1422,80 @@ async def health_check():
 
 @app.post("/query")
 async def process_query(request: QueryRequest):
-    """Process natural language queries"""
+    """Process natural language queries with AI-driven routing"""
     question = request.question
     question_lower = question.lower()
 
-    # For safety/incident queries, combine BP documents AND images
-    is_safety_query = any(keyword in question_lower for keyword in [
-        "incident", "safety", "hard hat", "helmet", "vest",
-        "equipment", "compliance", "without"
-    ])
+    # PHASE 1: Try AI-driven intelligent routing (OpenAI function calling / Cohere tool use)
+    logger.info(f"Processing query: {question}")
 
-    if is_safety_query:
-        # Query both BP documents AND images for comprehensive answer
-        bp_result = rag_service.query_bp_documents(question)
-        image_result = rag_service.query_images(question)
+    ai_result = rag_service.intelligent_route_query(question)
 
-        # Combine results
-        combined_answer = ""
-
-        # Add BP document insights
-        if bp_result.get("type") == "bp_documents":
-            combined_answer += "According to BP Annual Reports: " + bp_result["answer"] + "\n\n"
-
-        # Add image analysis
-        if image_result.get("type") == "image_analysis":
-            combined_answer += "Based on site camera analysis: " + image_result["answer"]
-        elif not combined_answer:
-            # If no BP data, show just image data
-            combined_answer = image_result["answer"]
-
-        result = {
-            "answer": combined_answer if combined_answer else "No safety incident data available.",
-            "bp_sources": bp_result.get("sources", []),
-            "image_data": image_result.get("data", []),
-            "sites": image_result.get("sites", []),
-            "avg_compliance": image_result.get("avg_compliance"),
-            "type": "combined_safety_analysis"
-        }
-
-    # Check for image-only queries (specific sites/workers)
-    elif any(keyword in question_lower for keyword in [
-        "image", "camera", "site", "worker", "engineer", "tablet"
-    ]):
-        result = rag_service.query_images(question)
-
-    # Check for log-related queries
-    elif any(keyword in question_lower for keyword in ["log", "ip", "error", "request"]):
-        result = rag_service.query_logs(question)
-
-    # Check for BP document queries only
-    elif any(keyword in question_lower for keyword in ["bp", "drill", "operation", "annual report"]):
-        result = rag_service.query_bp_documents(question)
-
+    if ai_result:
+        logger.info(f"✓ AI routing succeeded. Tools called: {ai_result.get('tools_called', [])}")
+        result = ai_result
     else:
-        result = {
-            "answer": "Please specify if you're asking about:\n- Safety incidents/compliance (combines BP reports + site images)\n- Site camera images (workers, equipment)\n- System logs (IP addresses, errors)\n- BP operations (drilling, procedures)",
-            "type": "clarification"
-        }
+        # PHASE 2: Fallback to keyword-based routing (Tier-0 reliability)
+        logger.info("AI routing unavailable, using keyword-based routing (Tier-0 fallback)")
+
+        # For safety/incident queries, combine BP documents AND images
+        is_safety_query = any(keyword in question_lower for keyword in [
+            "incident", "safety", "hard hat", "helmet", "vest",
+            "equipment", "compliance", "without"
+        ])
+
+        if is_safety_query:
+            # Query both BP documents AND images for comprehensive answer
+            bp_result = rag_service.query_bp_documents(question)
+            image_result = rag_service.query_images(question)
+
+            # Combine results
+            combined_answer = ""
+
+            # Add BP document insights
+            if bp_result.get("type") == "bp_documents":
+                combined_answer += "According to BP Annual Reports: " + bp_result["answer"] + "\n\n"
+
+            # Add image analysis
+            if image_result.get("type") == "image_analysis":
+                combined_answer += "Based on site camera analysis: " + image_result["answer"]
+            elif not combined_answer:
+                # If no BP data, show just image data
+                combined_answer = image_result["answer"]
+
+            result = {
+                "answer": combined_answer if combined_answer else "No safety incident data available.",
+                "bp_sources": bp_result.get("sources", []),
+                "image_data": image_result.get("data", []),
+                "sites": image_result.get("sites", []),
+                "avg_compliance": image_result.get("avg_compliance"),
+                "type": "combined_safety_analysis",
+                "routing_method": "keyword_fallback"
+            }
+
+        # Check for image-only queries (specific sites/workers)
+        elif any(keyword in question_lower for keyword in [
+            "image", "camera", "site", "worker", "engineer", "tablet"
+        ]):
+            result = rag_service.query_images(question)
+            result["routing_method"] = "keyword_fallback"
+
+        # Check for log-related queries
+        elif any(keyword in question_lower for keyword in ["log", "ip", "error", "request"]):
+            result = rag_service.query_logs(question)
+            result["routing_method"] = "keyword_fallback"
+
+        # Check for BP document queries only
+        elif any(keyword in question_lower for keyword in ["bp", "drill", "operation", "annual report"]):
+            result = rag_service.query_bp_documents(question)
+            result["routing_method"] = "keyword_fallback"
+
+        else:
+            result = {
+                "answer": "Please specify if you're asking about:\n- Safety incidents/compliance (combines BP reports + site images)\n- Site camera images (workers, equipment)\n- System logs (IP addresses, errors)\n- BP operations (drilling, procedures)",
+                "type": "clarification",
+                "routing_method": "keyword_fallback"
+            }
 
     return {
         "question": question,
@@ -1217,13 +1503,77 @@ async def process_query(request: QueryRequest):
         "timestamp": datetime.utcnow().isoformat()
     }
 
+# ============= SPECIALIZED QUERY ENDPOINTS =============
+
+@app.post("/query/images")
+async def query_images_endpoint(request: QueryRequest):
+    """Explicit image search - MongoDB embeddings for safety compliance analysis
+
+    Examples:
+    - "Show workers without hard hats"
+    - "Find sites with tablets"
+    - "Workers with safety vests"
+    """
+    result = rag_service.query_images(request.question)
+    return {
+        "question": request.question,
+        "result": result,
+        "timestamp": datetime.utcnow().isoformat(),
+        "source": "mongodb_images"
+    }
+
+@app.post("/query/documents")
+async def query_documents_endpoint(request: QueryRequest):
+    """Explicit PDF search - Vector semantic search (FAISS) on BP Annual Reports
+
+    Examples:
+    - "BP safety incidents in 2024"
+    - "Tier 1 and Tier 2 events"
+    - "Oil spill statistics"
+    """
+    result = rag_service.query_bp_documents(request.question)
+    return {
+        "question": request.question,
+        "result": result,
+        "timestamp": datetime.utcnow().isoformat(),
+        "source": "bp_documents_vector_search"
+    }
+
+@app.post("/query/logs")
+async def query_logs_endpoint(request: QueryRequest):
+    """Explicit log search - PostgreSQL operational data (system_logs table)
+
+    Examples:
+    - "Top IP addresses"
+    - "Error analysis"
+    - "Request statistics"
+    """
+    result = rag_service.query_logs(request.question)
+    return {
+        "question": request.question,
+        "result": result,
+        "timestamp": datetime.utcnow().isoformat(),
+        "source": "postgresql_logs"
+    }
+
+# ============= SERVICE STATS =============
+
 @app.get("/stats")
 async def get_stats():
     """Get RAG service statistics"""
     return {
         "bp_documents_loaded": len(rag_service.bp_documents),
         "log_entries_cached": len(rag_service.log_cache),
-        "cohere_enabled": rag_service.cohere_client is not None
+        "cohere_enabled": rag_service.cohere_client is not None,
+        "openai_enabled": rag_service.openai_client is not None,
+        "ai_provider": rag_service.ai_provider,
+        "vector_index_size": rag_service.faiss_index.ntotal if rag_service.faiss_index else 0,
+        "endpoints": {
+            "unified": "/query (auto-routes based on keywords)",
+            "images": "/query/images (MongoDB image embeddings)",
+            "documents": "/query/documents (FAISS vector search on PDFs)",
+            "logs": "/query/logs (PostgreSQL operational logs)"
+        }
     }
 
 if __name__ == "__main__":
