@@ -10,12 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies (cached if requirements.txt unchanged)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Force fresh pip install with no cache
+RUN pip install --no-cache-dir --force-reinstall -r requirements.txt
 
 # Clean up build dependencies (separate layer for flexibility)
-RUN apt-get purge -y gcc g++ \
-    && apt-get autoremove -y \
-    && apt-get clean
+RUN apt-get purge -y gcc g++ 2>/dev/null || true \
+    && apt-get autoremove -y 2>/dev/null || true \
+    && apt-get clean 2>/dev/null || true
 
 # Copy application code (changes frequently, stays at end)
 COPY . .

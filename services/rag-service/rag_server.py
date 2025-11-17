@@ -87,20 +87,26 @@ class RAGService:
 
             # Initialize AI providers (prefer OpenAI, fallback to Cohere)
             if OPENAI_API_KEY:
-                logger.info("Initializing OpenAI client...")
-                self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
-                self.use_openai = True
-                self.ai_provider = "OpenAI"
-                self.embedding_dimension = 3072  # text-embedding-3-large
-                logger.info("✓ OpenAI client initialized (text-embedding-3-large + gpt-4o)")
-            elif COHERE_API_KEY:
+                try:
+                    logger.info("Initializing OpenAI client...")
+                    self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+                    self.use_openai = True
+                    self.ai_provider = "OpenAI"
+                    self.embedding_dimension = 3072  # text-embedding-3-large
+                    logger.info("✓ OpenAI client initialized (text-embedding-3-large + gpt-4o)")
+                except Exception as e:
+                    logger.warning(f"OpenAI initialization failed: {e}, falling back to Cohere")
+                    self.openai_client = None
+                    # Fall through to Cohere initialization
+
+            if (not self.openai_client or not OPENAI_API_KEY) and COHERE_API_KEY:
                 logger.info("Initializing Cohere client...")
                 self.cohere_client = cohere.Client(COHERE_API_KEY)
                 self.use_openai = False
                 self.ai_provider = "Cohere"
                 self.embedding_dimension = 1024  # embed-english-v3.0
                 logger.info("✓ Cohere client initialized (embed-english-v3.0 + command-a-vision)")
-            else:
+            elif not self.openai_client:
                 logger.warning("⚠ No AI API keys set (OPENAI_API_KEY or COHERE_API_KEY), using rule-based responses")
 
             return True

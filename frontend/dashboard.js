@@ -323,9 +323,8 @@ async function runFailoverTest(targetRegion) {
 
         const result = await response.json();
 
-        // Update region display
-        document.getElementById('failover-current-region').textContent = result.target_region;
-        document.getElementById('failover-version').textContent = `v1.0.0057_${result.target_region}`;
+        // Refresh status from orchestrator to get updated version
+        await loadFailoverStatus();
 
         // Update status
         setTimeout(() => {

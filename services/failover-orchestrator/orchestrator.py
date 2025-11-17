@@ -37,6 +37,7 @@ app.add_middleware(
 # Global state
 CURRENT_REGION = "region1"
 FAILOVER_HISTORY = []
+DEPLOYMENT_VERSION = 57  # Increments with each successful failover
 
 class FailoverOrchestrator:
     def __init__(self):
@@ -71,7 +72,7 @@ class FailoverOrchestrator:
         5. Measure total downtime
         6. Validate data consistency
         """
-        global CURRENT_REGION
+        global CURRENT_REGION, DEPLOYMENT_VERSION
 
         if target_region == CURRENT_REGION and not test_mode:
             raise HTTPException(400, detail=f"Already running on {target_region}")
@@ -177,6 +178,10 @@ class FailoverOrchestrator:
             failover_log["sla_target"] = "99.99999%"
             failover_log["max_downtime_seconds"] = 3.15  # per year
 
+            # Increment deployment version on successful failover
+            DEPLOYMENT_VERSION += 1
+            failover_log["deployment_version"] = DEPLOYMENT_VERSION
+
             FAILOVER_HISTORY.append(failover_log)
 
             logger.info(f"✓ Failover complete: {old_region} → {target_region} in {total_failover_time:.3f}s")
@@ -272,7 +277,7 @@ async def get_status():
     """Get current failover status"""
     return {
         "current_region": CURRENT_REGION,
-        "version": f"v1.0.0057_{CURRENT_REGION}",
+        "version": f"v1.0.{DEPLOYMENT_VERSION:04d}_{CURRENT_REGION}",
         "failover_count": len(FAILOVER_HISTORY),
         "last_failover": FAILOVER_HISTORY[-1] if FAILOVER_HISTORY else None
     }
