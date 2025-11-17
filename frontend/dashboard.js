@@ -439,11 +439,6 @@ async function loadFailoverSummary() {
     }
 }
 
-// Simulate High Traffic
-function simulateHighTraffic() {
-    alert('Simulating high user traffic...\nThis would increase the active user count and test system scalability.');
-}
-
 // Utility Functions
 function formatNumber(num) {
     if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
