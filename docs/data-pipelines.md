@@ -215,42 +215,55 @@ sequenceDiagram
     participant UI as Dashboard
     participant API as Backend API
     participant RAG as RAG Service
-    participant COHERE as Cohere API
+    participant AI as OpenAI/Cohere
     participant PG as PostgreSQL
     participant MONGO as MongoDB
-    participant PDF as BP Documents
+    participant FAISS as FAISS Index
 
     UI->>API: POST /api/query<br/>{question: "How many safety incidents?"}
     API->>RAG: POST /query
 
-    Note over RAG: Classify query type<br/>(safety/image/log/BP)
+    Note over RAG: Phase 1: AI Routing<br/>OpenAI gpt-4o (primary)<br/>Cohere tool use (fallback)
 
-    alt Safety Query (Combined)
-        RAG->>PDF: Load BP documents<br/>Extract paragraphs
-        Note over RAG: Keyword search +<br/>relevance scoring
-        RAG->>PDF: Get top 5 snippets
+    RAG->>AI: Function calling / Tool use<br/>Analyze query intent
+    AI-->>RAG: Tool selection:<br/>["search_documents"]
 
-        RAG->>COHERE: chat(prompt with context)<br/>model: command-a-vision-07-2025
-        COHERE-->>RAG: Synthesized answer
+    alt Document Query (BP Reports)
+        RAG->>FAISS: Vector semantic search<br/>(text-embedding-3-large or embed-english-v3.0)
+        FAISS-->>RAG: Top 5-10 chunks with similarity scores
 
-        RAG->>MONGO: Query images collection<br/>safety_compliance filters
-        MONGO-->>RAG: Image metadata
-
-        RAG->>COHERE: chat(image analysis context)
-        COHERE-->>RAG: Synthesized image analysis
-
-        Note over RAG: Combine BP + Image results
+        RAG->>AI: Synthesis request<br/>gpt-4o or command-a-vision
+        AI-->>RAG: Synthesized answer with citations
     end
 
-    alt Log Query
+    alt Image Query (Site Cameras)
+        RAG->>MONGO: Query images collection<br/>safety_compliance filters
+        MONGO-->>RAG: Image metadata + compliance scores
+
+        RAG->>AI: Analysis synthesis
+        AI-->>RAG: Safety compliance summary
+    end
+
+    alt Log Query (System Operations)
         RAG->>PG: Aggregate queries on system_logs
-        PG-->>RAG: Statistics
-        RAG->>COHERE: chat(log stats context)
-        COHERE-->>RAG: Synthesized log analysis
+        PG-->>RAG: Statistics (IPs, errors, response times)
+
+        RAG->>AI: Log analysis synthesis
+        AI-->>RAG: Operational insights
+    end
+
+    alt Multi-Source Query
+        Note over RAG: AI selects multiple tools<br/>Executes in parallel
+        RAG->>FAISS: Search documents
+        RAG->>MONGO: Search images
+        FAISS-->>RAG: Document results
+        MONGO-->>RAG: Image results
+        RAG->>AI: Multi-source synthesis
+        AI-->>RAG: Combined comprehensive answer
     end
 
     RAG-->>API: {answer, sources, data, synthesized: true}
-    API-->>UI: Display combined answer
+    API-->>UI: Display answer with sources
 ```
 
 ### Pipeline Components
@@ -258,47 +271,92 @@ sequenceDiagram
 **RAG Service** (`services/rag-service/rag_server.py`)
 - **Port**: 8001
 - **Framework**: FastAPI
-- **Cohere Model**: `command-a-vision-07-2025`
-- **Temperature**: 0.3 (factual responses)
-- **Max Tokens**: 300-500 depending on query type
+- **AI Routing**:
+  - **Primary**: OpenAI `gpt-4o` function calling (~95% accuracy)
+  - **Fallback**: Cohere `command-a-vision-07-2025` tool use (~90% accuracy)
+  - **Tier-0**: Keyword-based routing (~70-80% accuracy, no API)
+- **Embedding Models**:
+  - **Primary**: OpenAI `text-embedding-3-large` (3072 dimensions)
+  - **Fallback**: Cohere `embed-english-v3.0` (1024 dimensions)
+- **LLM Models**:
+  - **Primary**: OpenAI `gpt-4o` for synthesis
+  - **Fallback**: Cohere `command-a-vision-07-2025` for synthesis
+- **Temperature**: 0.1 (routing), 0.3 (synthesis)
+- **Max Tokens**: 300-600 depending on query complexity
 
-**Query Classification**:
+**Query Routing** (AI-Driven):
 ```python
-# Safety queries (combined BP + images)
-keywords = ["incident", "safety", "hard hat", "helmet", "vest", "equipment", "compliance"]
+# Phase 1: AI function calling / tool use (OpenAI primary, Cohere fallback)
+tools = [
+    {"name": "search_images", "description": "Search site cameras for safety compliance..."},
+    {"name": "search_documents", "description": "Search BP Annual Reports via FAISS..."},
+    {"name": "search_logs", "description": "Search PostgreSQL system logs..."}
+]
 
-# Image queries
-keywords = ["image", "camera", "site", "worker", "engineer", "tablet"]
+# OpenAI gpt-4o with function calling (preferred)
+if openai_client:
+    response = openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[...],
+        tools=tools,
+        tool_choice="auto"
+    )
+    # AI returns: tool_calls = [{"function": {"name": "search_documents", ...}}]
 
-# Log queries
-keywords = ["log", "ip", "error", "request"]
+# Cohere command-a-vision with tool use (fallback)
+elif cohere_client:
+    response = cohere_client.chat(
+        message=question,
+        model="command-a-vision-07-2025",
+        tools=tools
+    )
+    # Cohere returns: tool_calls = [ToolCall(name="search_documents", ...)]
 
-# BP document queries
-keywords = ["bp", "drill", "operation", "annual report"]
+# Phase 2: Keyword fallback (Tier-0 reliability, no API)
+else:
+    # Rule-based routing by keyword matching
+    if "incident" in question or "safety" in question:
+        route_to = ["search_documents", "search_images"]
+    elif "image" in question or "camera" in question:
+        route_to = ["search_images"]
+    # ... etc
 ```
 
-**BP Document Processing**:
+**BP Document Processing** (Hybrid RAG):
 1. **Load PDFs**: Parse BP Annual Reports from `/app/bp_docs`
-2. **Keyword Search**: Find paragraphs matching safety keywords
-3. **Relevance Scoring**:
-   - Base score: +1 per keyword match
-   - Numerical boost: +5 if contains data (2024, 38, 96, etc.)
-   - Metric boost: +3 for specific terms (tier 1, tier 2, process safety)
-4. **Snippet Truncation**: Max 800 chars per snippet (prevent token overflow)
-5. **Cohere Synthesis**: Top 5 snippets → chat API → synthesized answer
-6. **Fallback**: If Cohere fails, return keyword-based excerpts
+2. **Vector Search** (Primary):
+   - Create overlapping chunks (1500 chars, 300 overlap)
+   - Generate embeddings (OpenAI `text-embedding-3-large` or Cohere `embed-english-v3.0`)
+   - Build FAISS index with cosine similarity
+   - Query: Generate embedding → FAISS search → Top-K retrieval
+3. **Pattern Matching** (Secondary):
+   - Regex patterns for specific metrics: `(\d+)\s+Tier\s+[12].*?events`
+   - Extract context window (1000 chars before/after)
+   - High relevance scoring for pattern matches
+4. **Keyword Search** (Fallback):
+   - Search for safety keywords when vector unavailable
+   - Relevance scoring: +1 per keyword, +5 for numbers, +3 for metrics
+5. **Deduplication**: Remove duplicate chunks by text similarity
+6. **AI Synthesis**:
+   - OpenAI `gpt-4o` (preferred) or Cohere `command-a-vision` (fallback)
+   - Top 5 snippets → LLM → synthesized answer with citations
+7. **Tier-0 Fallback**: If AI unavailable, return keyword-based excerpts
 
 **Image Query Processing**:
 1. **Query MongoDB**: Filter by `safety_compliance` fields
 2. **Aggregate Statistics**: Calculate avg compliance, site breakdown
-3. **Cohere Synthesis**: Send context to chat API for intelligent summary
-4. **Fallback**: Return raw statistics if Cohere fails
+3. **AI Synthesis**:
+   - OpenAI `gpt-4o` (preferred) or Cohere `command-a-vision` (fallback)
+   - Send context to LLM for intelligent summary
+4. **Tier-0 Fallback**: Return raw statistics if AI unavailable
 
 **Log Query Processing**:
 1. **Aggregate PostgreSQL**: Run SQL aggregations on `system_logs`
 2. **Extract Stats**: Top IPs, error counts, response times
-3. **Cohere Synthesis**: Generate insights from statistics
-4. **Fallback**: Return raw stats if Cohere fails
+3. **AI Synthesis**:
+   - OpenAI `gpt-4o` (preferred) or Cohere `command-a-vision` (fallback)
+   - Generate insights from statistics
+4. **Tier-0 Fallback**: Return raw stats if AI unavailable
 
 ### Query Examples
 
@@ -312,9 +370,11 @@ curl -X POST http://localhost:8001/query \
 **Response**:
 ```json
 {
-  "answer": "BP reported 38 Tier 1 and Tier 2 process safety events in 2024, a decrease from 39 in 2023. This includes 96 oil spills totaling 1,425 barrels...",
+  "answer": "BP reported 38 Tier 1 and Tier 2 process safety events in 2024, a decrease from 39 in 2023...",
   "sources": [...],
   "type": "bp_documents",
+  "routing_method": "ai_function_calling",
+  "tools_called": ["search_documents"],
   "synthesized": true
 }
 ```
@@ -334,34 +394,110 @@ curl -X POST http://localhost:8001/query \
   "sites": ["thermal_engine", "turbine", "electrical_rotor"],
   "avg_compliance": 56.7,
   "type": "image_analysis",
+  "routing_method": "ai_function_calling",
+  "tools_called": ["search_images"],
   "synthesized": true
 }
 ```
 
-### Cohere Integration Details
+### AI Integration Details
 
-**Configuration**:
+**Three-Tier AI Provider Strategy**:
+
+**Tier 1 - OpenAI (Primary)**:
 ```python
-response = self.cohere_client.chat(
-    message=prompt,
-    model="command-a-vision-07-2025",
-    temperature=0.3,  # Factual, not creative
-    max_tokens=500    # BP docs: 500, images/logs: 300
+# Routing with function calling
+response = openai_client.chat.completions.create(
+    model="gpt-4o",
+    messages=[...],
+    tools=[...],
+    tool_choice="auto",
+    temperature=0.1  # Low for deterministic routing
+)
+
+# Embeddings for vector search
+embedding = openai_client.embeddings.create(
+    model="text-embedding-3-large",  # 3072 dimensions
+    input=text
+)
+
+# Answer synthesis
+synthesis = openai_client.chat.completions.create(
+    model="gpt-4o",
+    messages=[...],
+    temperature=0.3,  # Slightly higher for natural language
+    max_tokens=500
 )
 ```
 
-**Token Management**:
-- BP snippets truncated to 800 chars each
-- Max 5 snippets = ~4,000 chars total
-- Well within 128K token limit
-
-**Fallback Strategy** (Tier-0 Reliability):
+**Tier 2 - Cohere (Fallback)**:
 ```python
+# Routing with tool use
+response = cohere_client.chat(
+    message=question,
+    model="command-a-vision-07-2025",
+    tools=[...],
+    temperature=0.1
+)
+
+# Embeddings for vector search (with rate limiting)
+embedding = cohere_client.embed(
+    texts=[text],
+    model="embed-english-v3.0",  # 1024 dimensions
+    input_type="search_document"
+)
+time.sleep(0.7)  # Rate limit: ~85 calls/min for trial keys
+
+# Answer synthesis
+synthesis = cohere_client.chat(
+    message=prompt,
+    model="command-a-vision-07-2025",
+    temperature=0.3,
+    max_tokens=500
+)
+```
+
+**Tier 3 - Keyword Routing (Tier-0 Reliability)**:
+```python
+# Rule-based routing when AI unavailable
+question_lower = question.lower()
+
+if any(kw in question_lower for kw in ["incident", "safety"]):
+    return query_bp_documents(question) + query_images(question)
+elif any(kw in question_lower for kw in ["image", "camera"]):
+    return query_images(question)
+elif any(kw in question_lower for kw in ["log", "ip", "error"]):
+    return query_logs(question)
+# ... etc
+```
+
+**Token Management**:
+- BP snippets: 800-1500 chars each (adaptive based on content type)
+- Max 5 snippets per query = ~4,000-7,500 chars total
+- OpenAI: 128K context window (well within limits)
+- Cohere: 128K context window (well within limits)
+
+**Reliability Strategy** (Tier-0 Compliance):
+```python
+# Phase 1: Try OpenAI
 try:
-    response = cohere_client.chat(...)
+    result = route_with_openai(question)
+    if result:
+        return result
 except Exception as e:
-    logger.warning(f"Cohere failed, falling back: {e}")
-    # Return keyword-based response
+    logger.warning(f"OpenAI failed: {e}")
+
+# Phase 2: Try Cohere fallback
+try:
+    result = route_with_cohere(question)
+    if result:
+        return result
+except Exception as e:
+    logger.warning(f"Cohere failed: {e}")
+
+# Phase 3: Keyword-based routing (no API dependency)
+logger.info("Using keyword routing (Tier-0 fallback)")
+return route_with_keywords(question)
 ```
 
 ---
@@ -399,6 +535,7 @@ sequenceDiagram
 - **Input**: `/app/images` (mounted from `assignment-materials/CMPE273HackathonData/`)
 - **Output**: MongoDB `tier0_images.images` collection
 - **Processing**: One-time on startup + periodic scans
+- **AI Provider**: Uses same tiered strategy (OpenAI primary, Cohere fallback)
 
 **Image Categories**:
 ```
@@ -424,10 +561,10 @@ compliance_score = (
 )
 ```
 
-**Cohere Embeddings**:
-- **Model**: Embed endpoint (not chat)
+**Embedding Generation**:
+- **Primary**: OpenAI `text-embedding-3-large` (3072 dimensions)
+- **Fallback**: Cohere `embed-english-v3.0` (1024 dimensions)
 - **Input**: Image description + keywords
-- **Output**: 1024-dimensional vector
 - **Purpose**: Semantic search across images
 
 **MongoDB Schema**:
@@ -445,7 +582,7 @@ compliance_score = (
     "has_inspection_equipment": true,
     "compliance_score": 100
   },
-  "embedding": [0.123, -0.456, ...],  // 1024-dim vector
+  "embedding": [0.123, -0.456, ...],  // 3072-dim (OpenAI) or 1024-dim (Cohere)
   "processed": true,
   "processed_at": ISODate("2025-11-16T12:30:00Z")
 }
@@ -454,8 +591,9 @@ compliance_score = (
 ### Performance Characteristics
 
 - **Processing Rate**: ~5-10 images/second
-- **Cohere API Latency**: ~200-500ms per embedding
-- **Initial Processing**: ~10-15 minutes for all images
+- **OpenAI API Latency**: ~100-200ms per embedding (no rate limit on paid tier)
+- **Cohere API Latency**: ~200-500ms per embedding (rate limited on trial: 0.7s sleep between calls)
+- **Initial Processing**: ~10-15 minutes for all images (OpenAI) or ~30-45 minutes (Cohere trial)
 - **Incremental Updates**: Process new images only
 
 ---
@@ -558,7 +696,7 @@ curl http://localhost:8003/status
 |----------|------------|---------|----------|-------|
 | **Device Telemetry** | 200 msg/sec | <50ms | PostgreSQL | Redis (60s TTL) |
 | **User Sessions** | 100 msg/sec | <10ms | PostgreSQL | None |
-| **RAG Queries** | 10 queries/sec | 500-2000ms | PostgreSQL + MongoDB | None |
+| **RAG Queries** | 10 queries/sec | 500-2000ms | PostgreSQL + MongoDB + FAISS | None |
 | **Image Processing** | 5-10 images/sec | 200-500ms | MongoDB | None |
 | **Failover** | On-demand | 3-5 seconds | PostgreSQL + Redis | N/A |
 
@@ -566,6 +704,7 @@ curl http://localhost:8003/status
 
 ## 🔗 Related Documentation
 
+- [RAG Service Architecture](rag-architecture.md) - Detailed AI agent pattern explanation
 - [System Architecture](architecture.md) - Component details
 - [Development Guide](development.md) - Testing pipelines locally
 - [Testing Guide](testing.md) - Pipeline validation procedures

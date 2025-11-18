@@ -48,7 +48,7 @@ graph TB
 
     subgraph "AI Services"
         RAG[RAG Service<br/>Port 8001<br/>AI-Driven Routing<br/>OpenAI/Cohere]
-        IMG_PROC[Image Processor<br/>Cohere Embeddings]
+        IMG_PROC[Image Processor<br/>AI Embeddings<br/>OpenAI/Cohere]
     end
 
     subgraph "Data Consumers"
@@ -187,7 +187,7 @@ graph TB
 - **Database**: `tier0_images`
 - **Collections**:
   - `images` - Image metadata + embeddings
-  - `image_embeddings` - Cohere vector embeddings
+  - `image_embeddings` - AI vector embeddings (OpenAI 3072-dim or Cohere 1024-dim)
 - **Purpose**: NoSQL storage for unstructured data
 
 ---
@@ -270,13 +270,13 @@ graph TB
 - **Token Management**: Adaptive snippet sizing (800-1500 chars based on content type)
 
 #### Image Processor
-- **Technology**: Python + Cohere Embeddings API
+- **Technology**: Python + AI Embeddings (OpenAI primary, Cohere fallback)
 - **Purpose**: Process site camera images
 - **Features**:
   - Safety compliance detection
   - Hard hat identification
   - PPE recognition
-  - Semantic embedding generation
+  - Semantic embedding generation (OpenAI `text-embedding-3-large` or Cohere `embed-english-v3.0`)
 - **Output**: MongoDB with embeddings + compliance scores
 
 ---

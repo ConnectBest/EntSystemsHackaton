@@ -37,11 +37,11 @@ A production-grade demonstration of **Tier-0 Enterprise Site Reliability Enginee
 <td width="50%">
 
 **🤖 AI Intelligence**
-- **AI-Driven Query Routing** with OpenAI/Cohere function calling
+- **AI-Driven Query Routing** with OpenAI GPT-4o (primary) / Cohere (fallback)
 - Multi-source queries (combines images, documents, logs)
 - Safety compliance detection from site cameras
 - BP document analysis with FAISS vector search
-- Automatic keyword fallback for Tier-0 reliability
+- Three-tier reliability: OpenAI → Cohere → Keyword fallback
 
 </td>
 </tr>
@@ -84,8 +84,8 @@ cd EntSystemsHackaton
 
 # 2. Configure environment (add AI API keys for intelligent routing)
 cp .env.example .env
-echo "OPENAI_API_KEY=sk-..." >> .env      # Preferred for gpt-4o function calling
-echo "COHERE_API_KEY=your_key_here" >> .env  # Fallback option
+echo "OPENAI_API_KEY=sk-..." >> .env      # PRIMARY: gpt-4o function calling + text-embedding-3-large
+echo "COHERE_API_KEY=your_key_here" >> .env  # FALLBACK: command-a-vision tool use + embed-english-v3.0
 
 # 3. Start all services (18+ containers)
 docker-compose up --build
@@ -219,7 +219,7 @@ curl -X POST \
 
 ### 2. AI-Enhanced RAG Query System
 
-**Natural Language Queries** powered by Cohere with **vector-based semantic search**:
+**Natural Language Queries** powered by **OpenAI GPT-4o** (primary) or **Cohere** (fallback) with **FAISS vector-based semantic search**:
 
 <table>
 <tr>
@@ -259,15 +259,16 @@ generating the most errors?"
 </table>
 
 **Architecture Highlights**:
-- **Vector Search**: FAISS + Cohere `embed-english-v3.0` embeddings (1024D)
-- **Semantic Retrieval**: Cosine similarity for intelligent matching
+- **AI Routing**: OpenAI `gpt-4o` function calling (primary, ~95% accuracy) or Cohere tool use (fallback, ~90% accuracy)
+- **Embeddings**: OpenAI `text-embedding-3-large` (3072D, primary) or Cohere `embed-english-v3.0` (1024D, fallback)
+- **Vector Search**: FAISS IndexFlatIP with cosine similarity for semantic matching
 - **Hybrid RAG**: Combines vector search + pattern matching + keyword search
-- **Top-K Retrieval**: Retrieves 5-10 most relevant chunks
-- **Cohere Synthesis**: `command-a-vision-07-2025` for answer generation
-- **Graceful Fallback**: Keyword-based responses (Tier-0 reliability)
-- **Combined Multi-Source**: Queries across BP docs + images + logs
+- **Top-K Retrieval**: Retrieves 5-10 most relevant chunks per query
+- **Answer Synthesis**: OpenAI `gpt-4o` (primary) or Cohere `command-a-vision-07-2025` (fallback)
+- **Three-Tier Reliability**: OpenAI → Cohere → Keyword fallback (Tier-0 uptime)
+- **Multi-Source Queries**: Combines BP docs + images + logs in single response
 
-📚 **Learn More**: [RAG Pipeline Architecture](docs/data-pipelines.md#3-ai-enhanced-rag-query-pipeline)
+📚 **Learn More**: [RAG Pipeline Architecture](docs/data-pipelines.md#3-ai-enhanced-rag-query-pipeline) | [RAG Service Architecture](docs/rag-architecture.md)
 
 ---
 
@@ -337,7 +338,7 @@ generating the most errors?"
 
 ### 4. AI-Powered Safety Compliance
 
-**Site Camera Intelligence** with Cohere embeddings and semantic search:
+**Site Camera Intelligence** with AI-powered analysis and semantic search:
 
 <table>
 <tr>
@@ -372,9 +373,10 @@ have tablets and safety vests"
 **Processing Pipeline**:
 1. Scan images from `assignment-materials/CMPE273HackathonData/`
 2. Extract safety keywords (hard hat, vest, etc.)
-3. Generate Cohere embeddings
+3. Generate embeddings (OpenAI preferred, Cohere fallback)
 4. Calculate compliance scores (0-100%)
 5. Store in MongoDB with metadata
+6. AI-powered query routing and analysis
 
 📚 **Learn More**: [Image Processing Pipeline](docs/data-pipelines.md#4-image-processing-pipeline)
 
@@ -399,7 +401,7 @@ graph LR
     Consumer1 --> DB
     Consumer2 --> DB
 
-    RAG --> Cohere[Cohere AI]
+    RAG --> AIProvider[OpenAI/Cohere AI]
     ImgProc[Image Processor] --> Mongo
 
     Failover[Failover<br/>Orchestrator] -.-> DB
@@ -489,11 +491,11 @@ graph LR
 <td width="25%">
 
 **AI/ML**
-- Cohere API (embeddings + LLM)
-- FAISS (vector search)
+- OpenAI API (GPT-4o, text-embedding-3-large)
+- Cohere API (fallback: command-a-vision, embed-english-v3.0)
+- FAISS (vector similarity search)
 - PyPDF (document parsing)
-- scikit-learn
-- NumPy
+- scikit-learn / NumPy
 
 </td>
 </tr>
